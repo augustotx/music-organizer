@@ -109,19 +109,15 @@ int organize_audio_file(char *file_path, char *extension, char *artist, char *al
             title[i] = '-';
         }
     }
+    char *album_path = malloc(strlen(album) + 3);
 
-    char *artist_path = malloc(strlen(artist) + 3);
-    char *album_path = malloc(strlen(artist) + strlen(album) + 4);
+    sprintf(album_path, "./%s", album);
 
-    sprintf(artist_path, "./%s", artist);
-    sprintf(album_path, "./%s/%s", artist, album);
-
-    create_directory(artist_path);
     create_directory(album_path);
 
     char *new_file_path = malloc(strlen(artist) + strlen(album) + strlen(title) + strlen(extension) + 8);
 
-    sprintf(new_file_path, "./%s/%s/%s%s", artist, album, title, extension);
+    sprintf(new_file_path, "./%s/%s - %s%s", album, artist, title, extension);
 
     if (debug)
     {
@@ -149,7 +145,6 @@ int organize_audio_file(char *file_path, char *extension, char *artist, char *al
         }
     }
 
-    free(artist_path);
     free(album_path);
     free(new_file_path);
 
@@ -217,7 +212,23 @@ int main(int argc, char *argv[])
     char extension[128];
     for (int i = optind; i < argc; ++i)
     {
+        struct stat file_stat;
+        if (stat(argv[i], &file_stat) == 0 && S_ISDIR(file_stat.st_mode))
+        {
+            if (verbose)
+            {
+                printf("%s is a directory.\n", argv[i]);
+            }
+            continue;
+        }
+
         TagLib_File *file = taglib_file_new(argv[i]);
+        if (!file)
+        {
+            fprintf(stderr, "Error opening file: %s\n", argv[i]);
+            continue;
+        }
+
         TagLib_Tag *tag = taglib_file_tag(file);
         char *artist = taglib_tag_artist(tag);
         char *album = taglib_tag_album(tag);
