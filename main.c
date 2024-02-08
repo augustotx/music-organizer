@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <getopt.h>
 #include <taglib/tag_c.h>
+#include <dirent.h>
 
 enum errornumbers
 {
@@ -17,7 +18,7 @@ enum errornumbers
     extension_compare_failure
 };
 
-int create_directory(const char *path)
+int create_directory(const char *path, int simulated)
 {
 #ifdef _WIN32
     _mkdir(path);
@@ -85,18 +86,28 @@ int organize_audio_file(char *file_path, char *extension, char *artist, char *al
 {
     int exitcode = success;
     char c = '/';
+    char and = '&';
     int i;
+    
     for (i = strlen(artist) - 1; i >= 0; i--)
     {
-        if (artist[i] == c)
+        if (artist[i] == c || artist[i] == and)
         {
-            artist[i] = '-';
+            char *new_artist = malloc(strlen(artist)*sizeof(char));
+            strncpy(new_artist,artist,i);
+            strcpy(artist,new_artist);
+            free(new_artist);
         }
     }
+    if(artist[strlen(artist)-1] == ' ')
+    {
+        artist[strlen(artist)-1] = '\0';
+    }
+
     for (i = strlen(album) - 1; i >= 0; i--)
     {
         char c = '/';
-        if (album[i] == c)
+        if (album[i] == c || album[i] == and)
         {
             album[i] = '-';
         }
@@ -104,23 +115,31 @@ int organize_audio_file(char *file_path, char *extension, char *artist, char *al
     for (i = strlen(title) - 1; i >= 0; i--)
     {
         char c = '/';
-        if (title[i] == c)
+        if (title[i] == c || title[i] == and)
         {
             title[i] = '-';
         }
     }
-    char *album_path = malloc(strlen(album) + 3);
+    char *artist_path = malloc(strlen(artist) + 3);
 
-    sprintf(album_path, "./%s", album);
+    sprintf(artist_path, "./%s", artist);
 
-    create_directory(album_path);
+    create_directory(artist_path, simulated);
 
-    char *new_file_path = malloc(strlen(artist) + strlen(album) + strlen(title) + strlen(extension) + 8);
+    char *album_path = malloc(strlen(artist_path) + strlen(album) + 2);
 
-    sprintf(new_file_path, "./%s/%s - %s%s", album, artist, title, extension);
+    sprintf(album_path, "%s/%s", artist_path, album);
+
+    create_directory(album_path, simulated);
+
+    char *new_file_path = malloc(strlen(artist) + strlen(album) + strlen(title) + strlen(extension) + 10);
+
+    sprintf(new_file_path, "./%s/%s/%s%s", artist, album, title, extension);
 
     if (debug)
     {
+        printf("Debug: artist_path: %s\n", artist_path);
+        printf("Debug: album_path: %s\n", album_path);
         printf("Debug: file_path: %s\n", file_path);
         printf("Debug: new_file_path: %s\n", new_file_path);
     }
@@ -145,6 +164,7 @@ int organize_audio_file(char *file_path, char *extension, char *artist, char *al
         }
     }
 
+    free(artist_path);
     free(album_path);
     free(new_file_path);
 
@@ -162,23 +182,127 @@ int print_help(const char *program_name)
     return success;
 }
 
+int process_file(char *name, int debug, int verbose, int simulated)
+{
+    if (verbose)
+    {
+        printf("%s is a file.\n", name);
+    }
+
+    char *extension = malloc(10);
+    if (getExtension(name, extension) == getextension_failure)
+    {
+        printf("Error getting extension of file %s.\n", name);
+        return misc_error;
+    }
+
+    if (allExtensionsCompare(extension) == extension_compare_failure)
+    {
+        printf("Error: File %s has an invalid extension.\n", name);
+        return invalid_argument;
+    }
+
+    TagLib_File *file = taglib_file_new(name);
+    if (file == NULL)
+    {
+        printf("Error opening file %s.\n", name);
+        return misc_error;
+    }
+
+    TagLib_Tag *tag = taglib_file_tag(file);
+    if (tag == NULL)
+    {
+        printf("Error getting tag of file %s.\n", name);
+        return misc_error;
+    }
+
+    char *artist = taglib_tag_artist(tag);
+    char *album = taglib_tag_album(tag);
+    char *title = taglib_tag_title(tag);
+
+    if (artist == NULL || album == NULL || title == NULL)
+    {
+        printf("Error getting artist, album or title of file %s.\n", name);
+        return misc_error;
+    }
+
+    if (organize_audio_file(name, extension, artist, album, title, debug, verbose, simulated) != success)
+    {
+        return misc_error;
+    }
+
+    taglib_tag_free_strings();
+    taglib_file_free(file);
+    free(extension);
+    return success;
+}
+
+int process_directory(const char *dir_path, int debug, int verbose, int simulated, int recursive)
+{
+    DIR *dir = opendir(dir_path);
+    if (!dir)
+    {
+        fprintf(stderr, "Error opening directory: %s\n", dir_path);
+        return misc_error;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL)
+    {
+        if (entry->d_type == DT_DIR)
+        {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            {
+                continue;
+            }
+
+            char sub_dir_path[PATH_MAX];
+            snprintf(sub_dir_path, sizeof(sub_dir_path), "%s/%s", dir_path, entry->d_name);
+
+            if (process_directory(sub_dir_path, debug, verbose, simulated, recursive) != success)
+            {
+                closedir(dir);
+                return misc_error;
+            }
+        }
+        else if (entry->d_type == DT_REG)
+        {
+            char file_path[PATH_MAX];
+            snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, entry->d_name);
+
+            int file_result = process_file(file_path, debug, verbose, simulated);
+            if (file_result != success && file_result != invalid_argument)
+            {
+                closedir(dir);
+                return misc_error;
+            }
+        }
+    }
+
+    closedir(dir);
+    return success;
+}
+
 int main(int argc, char *argv[])
 {
     int debug = 0;
     int verbose = 0;
     int simulated = 0;
+    int recursive = 0;
+    char *output_dir;
 
     static struct option long_options[] = {
         {"debug", no_argument, 0, 0},
         {"verbose", no_argument, 0, 'v'},
         {"simulated", no_argument, 0, 's'},
+        {"recursive", no_argument, 0, 'r'},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}};
 
     int option_index = 0;
     int opt;
 
-    while ((opt = getopt_long(argc, argv, "vsh", long_options, &option_index)) != -1)
+    while ((opt = getopt_long(argc, argv, "vshr", long_options, &option_index)) != -1)
     {
         switch (opt)
         {
@@ -193,9 +317,12 @@ int main(int argc, char *argv[])
             break;
         case 'h':
             print_help(argv[0]);
-            return 0;
+            return success;
         case 's':
             simulated = 1;
+            break;
+        case 'r':
+            recursive = 1;
             break;
         case '?':
             fprintf(stderr, "Unknown option -%c\n", optopt);
@@ -209,7 +336,6 @@ int main(int argc, char *argv[])
         return no_arguments;
     }
 
-    char extension[128];
     for (int i = optind; i < argc; ++i)
     {
         struct stat file_stat;
@@ -219,49 +345,13 @@ int main(int argc, char *argv[])
             {
                 printf("%s is a directory.\n", argv[i]);
             }
-            continue;
-        }
 
-        TagLib_File *file = taglib_file_new(argv[i]);
-        if (!file)
-        {
-            fprintf(stderr, "Error opening file: %s\n", argv[i]);
-            continue;
-        }
-
-        TagLib_Tag *tag = taglib_file_tag(file);
-        char *artist = taglib_tag_artist(tag);
-        char *album = taglib_tag_album(tag);
-        char *title = taglib_tag_title(tag);
-
-        int ext_check = getExtension(argv[i], extension);
-
-        if (ext_check == success)
-        {
-            if (organize_audio_file(argv[i], extension, artist, album, title, debug, verbose, simulated) == organize_failure)
-            {
-                return organize_failure;
-            }
+            process_directory(argv[i], debug, verbose, simulated, recursive);
         }
         else
         {
-            if (ext_check == getextension_failure)
-            {
-                return getextension_failure;
-            }
-            else if (ext_check == extension_compare_failure)
-            {
-                continue;
-            }
-            else
-            {
-                return misc_error;
-            }
+            process_file(argv[i], debug, verbose, simulated);
         }
-
-        taglib_tag_free_strings();
-        taglib_file_free(file);
     }
-
     return success;
 }
