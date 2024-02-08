@@ -1,6 +1,8 @@
 # Prerequisites
 *.d
 
+.vscode
+
 Music
 
 # Object files
