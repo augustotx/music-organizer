@@ -18,6 +18,30 @@ enum errornumbers
     extension_compare_failure
 };
 
+int input(char *text, char *str, int max_len)
+{
+    strcpy(str, "");
+    printf("%s", text);
+    printf("");
+    if (fgets(str, max_len, stdin) != NULL)
+    {
+        for (int i = 0; i < max_len; i++)
+        {
+            if (str[i] == '\n')
+            {
+                str[i] == '\0';
+                break;
+            }
+        }
+        // Retorna 1 porque eu uso como comparador em ifs
+        return 1;
+    }
+    else
+    {
+        return 0;
+    }
+}
+
 int create_directory(const char *path, int simulated)
 {
 #ifdef _WIN32
@@ -82,32 +106,34 @@ int getExtension(char *file, char *extension)
     return success;
 }
 
-int organize_audio_file(char *file_path, char *extension, char *artist, char *album, char *title, int debug, int verbose, int simulated)
+int organize_audio_file(char *file_path, char *output_dir, char *extension, char *artist, char *album, char *title, int debug, int verbose, int simulated)
 {
     int exitcode = success;
     char c = '/';
     char and = '&';
+    char comma = ',';
+    char semicolon = ';';
     int i;
-    
+
     for (i = strlen(artist) - 1; i >= 0; i--)
     {
-        if (artist[i] == c || artist[i] == and)
+        if (artist[i] == c || artist[i] == and || artist[i] == comma || artist[i] == semicolon)
         {
-            char *new_artist = malloc(strlen(artist)*sizeof(char));
-            strncpy(new_artist,artist,i);
-            strcpy(artist,new_artist);
+            char *new_artist = malloc(strlen(artist) * sizeof(char));
+            strncpy(new_artist, artist, i);
+            strcpy(artist, new_artist);
             free(new_artist);
         }
     }
-    if(artist[strlen(artist)-1] == ' ')
+    if (artist[strlen(artist) - 1] == ' ')
     {
-        artist[strlen(artist)-1] = '\0';
+        artist[strlen(artist) - 1] = '\0';
     }
 
     for (i = strlen(album) - 1; i >= 0; i--)
     {
         char c = '/';
-        if (album[i] == c || album[i] == and)
+        if (album[i] == c || album[i] == and || album[i] == comma || album[i] == semicolon)
         {
             album[i] = '-';
         }
@@ -115,26 +141,33 @@ int organize_audio_file(char *file_path, char *extension, char *artist, char *al
     for (i = strlen(title) - 1; i >= 0; i--)
     {
         char c = '/';
-        if (title[i] == c || title[i] == and)
+        if (title[i] == c || title[i] == and || title[i] == comma || title[i] == semicolon)
         {
             title[i] = '-';
         }
     }
-    char *artist_path = malloc(strlen(artist) + 3);
 
-    sprintf(artist_path, "./%s", artist);
+    char *output_dir_path = malloc(sizeof(char) * (strlen(output_dir) + 3));
+
+    sprintf(output_dir_path, "./%s", output_dir);
+
+    create_directory(output_dir_path, simulated);
+
+    char *artist_path = malloc(sizeof(char) * (strlen(output_dir_path) + strlen(artist) + 2));
+
+    sprintf(artist_path, "%s/%s", output_dir_path, artist);
 
     create_directory(artist_path, simulated);
 
-    char *album_path = malloc(strlen(artist_path) + strlen(album) + 2);
+    char *album_path = malloc(sizeof(char) * (strlen(artist_path) + strlen(album) + 2));
 
     sprintf(album_path, "%s/%s", artist_path, album);
 
     create_directory(album_path, simulated);
 
-    char *new_file_path = malloc(strlen(artist) + strlen(album) + strlen(title) + strlen(extension) + 10);
+    char *new_file_path = malloc(sizeof(char) * (strlen(artist) + strlen(album) + strlen(title) + strlen(extension) + 10));
 
-    sprintf(new_file_path, "./%s/%s/%s%s", artist, album, title, extension);
+    sprintf(new_file_path, "./%s/%s/%s/%s%s", output_dir, artist, album, title, extension);
 
     if (debug)
     {
@@ -164,6 +197,7 @@ int organize_audio_file(char *file_path, char *extension, char *artist, char *al
         }
     }
 
+    free(output_dir_path);
     free(artist_path);
     free(album_path);
     free(new_file_path);
@@ -177,12 +211,13 @@ int print_help(const char *program_name)
     printf("Options:\n");
     printf("  --debug          Enable debug mode\n");
     printf("  -h, --help       Display this help message\n");
-    printf("  -v, --verbose    Display this help message\n");
-    printf("  -s, --simulated  Display this help message\n");
+    printf("  -v, --verbose    Display any change\n");
+    printf("  -o, --output     Choose output directory name\n");
+    printf("  -s, --simulated  Simulate output\n");
     return success;
 }
 
-int process_file(char *name, int debug, int verbose, int simulated)
+int process_file(char *name, char *output_dir, int debug, int verbose, int simulated)
 {
     if (verbose)
     {
@@ -198,7 +233,8 @@ int process_file(char *name, int debug, int verbose, int simulated)
 
     if (allExtensionsCompare(extension) == extension_compare_failure)
     {
-        printf("Error: File %s has an invalid extension.\n", name);
+        if(verbose)
+            printf("Error: File %s has an invalid extension.\n", name);
         return invalid_argument;
     }
 
@@ -216,9 +252,13 @@ int process_file(char *name, int debug, int verbose, int simulated)
         return misc_error;
     }
 
-    char *artist = taglib_tag_artist(tag);
-    char *album = taglib_tag_album(tag);
-    char *title = taglib_tag_title(tag);
+    char *artist = malloc(1024 * sizeof(char));
+    char *album = malloc(1024 * sizeof(char));
+    char *title = malloc(1024 * sizeof(char));
+
+    strcpy(artist, taglib_tag_artist(tag));
+    strcpy(album, taglib_tag_album(tag));
+    strcpy(title, taglib_tag_title(tag));
 
     if (artist == NULL || album == NULL || title == NULL)
     {
@@ -226,7 +266,7 @@ int process_file(char *name, int debug, int verbose, int simulated)
         return misc_error;
     }
 
-    if (organize_audio_file(name, extension, artist, album, title, debug, verbose, simulated) != success)
+    if (organize_audio_file(name, output_dir, extension, artist, album, title, debug, verbose, simulated) != success)
     {
         return misc_error;
     }
@@ -234,10 +274,13 @@ int process_file(char *name, int debug, int verbose, int simulated)
     taglib_tag_free_strings();
     taglib_file_free(file);
     free(extension);
+    free(artist);
+    free(album);
+    free(title);
     return success;
 }
 
-int process_directory(const char *dir_path, int debug, int verbose, int simulated, int recursive)
+int process_directory(const char *dir_path, char *output_dir, int debug, int verbose, int simulated, int recursive)
 {
     DIR *dir = opendir(dir_path);
     if (!dir)
@@ -259,7 +302,7 @@ int process_directory(const char *dir_path, int debug, int verbose, int simulate
             char sub_dir_path[PATH_MAX];
             snprintf(sub_dir_path, sizeof(sub_dir_path), "%s/%s", dir_path, entry->d_name);
 
-            if (process_directory(sub_dir_path, debug, verbose, simulated, recursive) != success)
+            if (process_directory(sub_dir_path, output_dir, debug, verbose, simulated, recursive) != success)
             {
                 closedir(dir);
                 return misc_error;
@@ -270,7 +313,7 @@ int process_directory(const char *dir_path, int debug, int verbose, int simulate
             char file_path[PATH_MAX];
             snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, entry->d_name);
 
-            int file_result = process_file(file_path, debug, verbose, simulated);
+            int file_result = process_file(file_path, output_dir, debug, verbose, simulated);
             if (file_result != success && file_result != invalid_argument)
             {
                 closedir(dir);
@@ -290,6 +333,7 @@ int main(int argc, char *argv[])
     int simulated = 0;
     int recursive = 0;
     char *output_dir;
+    strcpy(output_dir, "out");
 
     static struct option long_options[] = {
         {"debug", no_argument, 0, 0},
@@ -301,6 +345,7 @@ int main(int argc, char *argv[])
 
     int option_index = 0;
     int opt;
+    int opt_index = 1;
 
     while ((opt = getopt_long(argc, argv, "vshr", long_options, &option_index)) != -1)
     {
@@ -328,6 +373,23 @@ int main(int argc, char *argv[])
             fprintf(stderr, "Unknown option -%c\n", optopt);
             return invalid_argument;
         }
+        opt_index++;
+    }
+
+    char choice;
+    while (1)
+    {
+        if (input("This operation is irreversible. Are you sure? (y/N): ", &choice, 128))
+        {
+            if (choice == 'y' || choice == 'Y')
+            {
+                break;
+            }
+            else if (choice == 'n' || choice == 'N' || choice == '\0')
+            {
+                return success;
+            }
+        }
     }
 
     if (argc == optind)
@@ -338,6 +400,10 @@ int main(int argc, char *argv[])
 
     for (int i = optind; i < argc; ++i)
     {
+        if (!(strcmp(argv[i], output_dir)))
+        {
+            continue;
+        }
         struct stat file_stat;
         if (stat(argv[i], &file_stat) == 0 && S_ISDIR(file_stat.st_mode))
         {
@@ -346,12 +412,13 @@ int main(int argc, char *argv[])
                 printf("%s is a directory.\n", argv[i]);
             }
 
-            process_directory(argv[i], debug, verbose, simulated, recursive);
+            process_directory(argv[i], output_dir, debug, verbose, simulated, recursive);
         }
         else
         {
-            process_file(argv[i], debug, verbose, simulated);
+            process_file(argv[i], output_dir, debug, verbose, simulated);
         }
     }
+    printf("Done.\nSongs organized in ./%s.\n", output_dir);
     return success;
 }
